@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+import { generateRunId } from '../config/run-id.js';
 
 type Scenario = 'homepage' | 'authentication';
 type Environment = 'local' | 'dev' | 'live';
@@ -63,22 +63,6 @@ Examples:
   npm run test:runner -- --scenario authentication --env dev
   npm run test:runner -- --scenario authentication --env live
 `);
-}
-
-function generateRunId(): string {
-  const now = new Date();
-
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-
-  const random = randomBytes(3).toString('hex');
-
-  return `${year}-${month}-${day}_${hours}${minutes}${seconds}_${random}`;
 }
 
 const scenario = getArgument('--scenario');
@@ -233,12 +217,16 @@ child.on('exit', async (code) => {
 
   console.log('\nHTML Report:');
   console.log(
-    path.join(reportDirectory, 'html')
+    path.resolve(
+      `scenarios/${selectedScenario}/reports/playwright/html`
+    )
   );
 
   console.log('\nJSON Result:');
   console.log(
-    path.join(reportDirectory, 'results.json')
+    path.resolve(
+      `scenarios/${selectedScenario}/results/playwright/${selectedEnvironment}/${runId}/results.json`
+    )
   );
 
   console.log('\nMetadata:');

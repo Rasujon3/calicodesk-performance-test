@@ -1,16 +1,52 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'node:path';
 import { environment } from './config/environments.js';
+import { resolvePlaywrightRunId } from './config/run-id.js';
 
-const scenario = process.env.PLAYWRIGHT_SCENARIO ?? 'all';
+const validScenarios = ['homepage', 'authentication'] as const;
+
+function resolveScenario(): string {
+  if (
+    process.env.PLAYWRIGHT_SCENARIO &&
+    validScenarios.includes(
+      process.env.PLAYWRIGHT_SCENARIO as (typeof validScenarios)[number]
+    )
+  ) {
+    return process.env.PLAYWRIGHT_SCENARIO;
+  }
+
+  const projectIndex = process.argv.findIndex(
+    (argument) => argument === '--project' || argument === '-p'
+  );
+
+  if (projectIndex !== -1) {
+    const projectName = process.argv[projectIndex + 1];
+
+    if (
+      projectName &&
+      validScenarios.includes(
+        projectName as (typeof validScenarios)[number]
+      )
+    ) {
+      return projectName;
+    }
+  }
+
+  return 'homepage';
+}
+
+const scenario = resolveScenario();
 
 const environmentName = process.env.TEST_ENV ?? 'local';
 
-const runId =
-  process.env.PLAYWRIGHT_RUN_ID ?? 'manual';
+const runId = resolvePlaywrightRunId();
 
 const scenarioReportDirectory = path.resolve(
   `scenarios/${scenario}/reports/playwright/${environmentName}/${runId}`
+);
+
+const htmlReportDirectory = path.resolve(
+  `scenarios/${scenario}/reports/playwright/html`
 );
 
 export default defineConfig({
@@ -34,10 +70,7 @@ export default defineConfig({
     [
       'html',
       {
-        outputFolder: path.join(
-          scenarioReportDirectory,
-          'html'
-        ),
+        outputFolder: htmlReportDirectory,
         open: 'never',
       },
     ],
