@@ -1,15 +1,28 @@
+import 'dotenv/config';
+
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 
 type Scenario = 'homepage' | 'authentication';
+
 type Environment = 'local' | 'dev' | 'live';
+
+type Profile =
+  | 'smoke'
+  | 'load'
+  | 'stress'
+  | 'spike'
+  | 'soak'
+  | 'rps';
 
 interface RunMetadata {
   runId: string;
   scenario: Scenario;
   environment: Environment;
+  profile: Profile;
+  baseUrl: string;
   startedAt: string;
   completedAt?: string;
   status: 'running' | 'passed' | 'failed';
@@ -28,6 +41,15 @@ const validEnvironments: Environment[] = [
   'live',
 ];
 
+const validProfiles: Profile[] = [
+  'smoke',
+  'load',
+  'stress',
+  'spike',
+  'soak',
+  'rps',
+];
+
 function getArgument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
 
@@ -43,7 +65,7 @@ function printUsage(): void {
 CalicoDesk k6 Test Runner
 
 Usage:
-  npm run k6:runner -- --scenario <scenario> --env <environment>
+  npm run k6:runner -- --scenario <scenario> --env <environment> --profile <profile>
 
 Scenarios:
   homepage
@@ -54,14 +76,23 @@ Environments:
   dev
   live
 
-Examples:
-  npm run k6:runner -- --scenario homepage --env local
-  npm run k6:runner -- --scenario homepage --env dev
-  npm run k6:runner -- --scenario homepage --env live
+Profiles:
+  smoke
+  load
+  stress
+  spike
+  soak
+  rps
 
-  npm run k6:runner -- --scenario authentication --env local
-  npm run k6:runner -- --scenario authentication --env dev
-  npm run k6:runner -- --scenario authentication --env live
+Examples:
+
+  npm run k6:runner -- --scenario homepage --env local --profile smoke
+
+  npm run k6:runner -- --scenario homepage --env dev --profile load
+
+  npm run k6:runner -- --scenario homepage --env live --profile smoke
+
+  npm run k6:runner -- --scenario authentication --env dev --profile smoke
 `);
 }
 
@@ -81,56 +112,62 @@ function generateRunId(): string {
   return `${year}-${month}-${day}_${hours}${minutes}${seconds}_${random}`;
 }
 
-const scenario = getArgument('--scenario');
-const environment = getArgument('--env');
-const profile = getArgument('--profile') ?? 'smoke';
-
-const validProfiles = [
-  'smoke',
-  'load',
-  'stress',
-  'spike',
-  'soak',
-  'rps',
-];
-
-if (!validProfiles.includes(profile)) {
-  console.error(`Invalid profile: ${profile}`);
+function fail(message: string): never {
+  console.error(`\n${message}\n`);
   process.exit(1);
 }
 
-if (!scenario || !environment) {
-  console.error('\nMissing required arguments.\n');
+const scenario = getArgument('--scenario');
+const environment = getArgument('--env');
 
+const profile =
+  (getArgument('--profile') ?? 'smoke') as Profile;
+
+if (!scenario || !environment) {
   printUsage();
 
-  process.exit(1);
+  fail('Missing required arguments.');
 }
 
 if (!validScenarios.includes(scenario as Scenario)) {
-  console.error(`\nInvalid scenario: ${scenario}\n`);
-
-  console.error(
-    `Allowed scenarios: ${validScenarios.join(', ')}`
+  fail(
+    `Invalid scenario: ${scenario}\nAllowed scenarios: ${validScenarios.join(', ')}`
   );
-
-  process.exit(1);
 }
 
 if (!validEnvironments.includes(environment as Environment)) {
-  console.error(`\nInvalid environment: ${environment}\n`);
-
-  console.error(
-    `Allowed environments: ${validEnvironments.join(', ')}`
+  fail(
+    `Invalid environment: ${environment}\nAllowed environments: ${validEnvironments.join(', ')}`
   );
+}
 
-  process.exit(1);
+if (!validProfiles.includes(profile)) {
+  fail(
+    `Invalid profile: ${profile}\nAllowed profiles: ${validProfiles.join(', ')}`
+  );
 }
 
 const selectedScenario = scenario as Scenario;
-const selectedEnvironment = environment as Environment;
+
+const selectedEnvironment =
+  environment as Environment;
 
 const runId = generateRunId();
+
+const baseUrl =
+  process.env[
+    `${selectedEnvironment.toUpperCase()}_BASE_URL`
+  ] ?? '';
+
+if (!baseUrl) {
+  console.log('baseUrl', baseUrl);
+  
+  fail(
+    `BASE_URL is not configured for environment: ${selectedEnvironment}`
+  );
+}
+
+console.log(`Base URL: ${baseUrl}`);
 
 const scenarioRoot = path.resolve(
   `scenarios/${selectedScenario}/k6`
@@ -157,15 +194,27 @@ const scriptPath = path.resolve(
   `${scenarioRoot}/${selectedScenario}.ts`
 );
 
+const resultsPath = path.join(
+  resultsDirectory,
+  'results.json'
+);
+
+const summaryPath = path.join(
+  reportDirectory,
+  'summary.json'
+);
+
 const startedAt = new Date().toISOString();
 
 const command =
-  `npm run k6:runner -- --scenario ${selectedScenario} --env ${selectedEnvironment}`;
+  `npm run k6:runner -- --scenario ${selectedScenario} --env ${selectedEnvironment} --profile ${profile}`;
 
 const metadata: RunMetadata = {
   runId,
   scenario: selectedScenario,
   environment: selectedEnvironment,
+  profile,
+  baseUrl,
   startedAt,
   status: 'running',
   command,
@@ -179,9 +228,12 @@ await mkdir(resultsDirectory, {
   recursive: true,
 });
 
-await mkdir(path.dirname(bundlePath), {
-  recursive: true,
-});
+await mkdir(
+  path.dirname(bundlePath),
+  {
+    recursive: true,
+  }
+);
 
 await writeFile(
   metadataPath,
@@ -194,7 +246,8 @@ console.log('CalicoDesk k6 Test Runner');
 console.log('========================================');
 console.log(`Scenario:    ${selectedScenario}`);
 console.log(`Environment: ${selectedEnvironment}`);
-console.log(`Profile: ${profile}`);
+console.log(`Profile:     ${profile}`);
+console.log(`Base URL:    ${baseUrl}`);
 console.log(`Run ID:      ${runId}`);
 console.log('========================================\n');
 
@@ -216,15 +269,17 @@ const esbuildArgs = [
   `--outfile=${bundlePath}`,
 ];
 
-const build = spawn(esbuildCommand, esbuildArgs, {
-  stdio: 'inherit',
-
-  shell: process.platform === 'win32',
-
-  env: {
-    ...process.env,
-  },
-});
+const build = spawn(
+  esbuildCommand,
+  esbuildArgs,
+  {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    env: {
+      ...process.env,
+    },
+  }
+);
 
 build.on('error', async (error) => {
   console.error('\nFailed to start esbuild.');
@@ -264,44 +319,63 @@ build.on('exit', async (buildCode) => {
     process.exit(buildCode ?? 1);
   }
 
-  console.log('\nTypeScript bundle created successfully.');
+  console.log(
+    '\nTypeScript bundle created successfully.'
+  );
 
-  console.log('\nStep 2/2: Running k6...\n');
+  console.log(
+    '\nStep 2/2: Running k6...\n'
+  );
 
   const k6Command = 'k6';
 
   const k6Args = [
     'run',
 
+    '--env',
+    `BASE_URL=${baseUrl}`,
+
+    '--env',
+    `K6_PROFILE=${profile}`,
+
+    '--env',
+    `K6_SCENARIO=${selectedScenario}`,
+
+    '--env',
+    `K6_RUN_ID=${runId}`,
+
     '--out',
-    `json=${path.join(resultsDirectory, 'results.json')}`,
+    `json=${resultsPath}`,
 
     '--summary-export',
-    path.join(reportDirectory, 'summary.json'),
+    summaryPath,
 
     bundlePath,
   ];
 
-  const k6 = spawn(k6Command, k6Args, {
-    stdio: 'inherit',
+  const k6 = spawn(
+    k6Command,
+    k6Args,
+    {
+      stdio: 'inherit',
 
-    shell: process.platform === 'win32',
+      shell: process.platform === 'win32',
 
-    env: {
-      ...process.env,
+      env: {
+        ...process.env,
 
-      TEST_ENV: selectedEnvironment,
+        TEST_ENV: selectedEnvironment,
 
-      K6_SCENARIO: selectedScenario,
+        K6_SCENARIO: selectedScenario,
 
-      K6_RUN_ID: runId,
+        K6_RUN_ID: runId,
 
-      BASE_URL:
-        process.env[
-          `${selectedEnvironment.toUpperCase()}_BASE_URL`
-        ] ?? '',
-    },
-  });
+        K6_PROFILE: profile,
+
+        BASE_URL: baseUrl,
+      },
+    }
+  );
 
   k6.on('error', async (error) => {
     console.error('\nFailed to start k6.');
@@ -324,44 +398,138 @@ build.on('exit', async (buildCode) => {
   });
 
   k6.on('exit', async (code) => {
-    const status = code === 0 ? 'passed' : 'failed';
+    let k6Failed = code !== 0;
+
+    /*
+     * k6 can exit with code 0 even when
+     * checks or HTTP requests fail.
+     *
+     * Therefore, also inspect summary.json.
+     */
+    try {
+      const summaryText = await readFile(
+        summaryPath,
+        'utf8'
+      );
+
+      const summary = JSON.parse(summaryText);
+
+      const checks = summary.metrics?.checks;
+      const httpReqFailed =
+        summary.metrics?.http_req_failed;
+
+      const checksFailed =
+        checks?.values?.fails ?? 0;
+
+      const httpFailedRate =
+        httpReqFailed?.values?.rate ?? 0;
+
+      if (checksFailed > 0) {
+        k6Failed = true;
+      }
+
+      if (httpFailedRate > 0) {
+        k6Failed = true;
+      }
+    } catch (error) {
+      console.error(
+        '\nWarning: Could not validate k6 summary.'
+      );
+
+      console.error(error);
+
+      k6Failed = true;
+    }
+
+    const status =
+      k6Failed
+        ? 'failed'
+        : 'passed';
 
     const completedMetadata: RunMetadata = {
       ...metadata,
-      completedAt: new Date().toISOString(),
+
+      completedAt:
+        new Date().toISOString(),
+
       status,
-      exitCode: code ?? 1,
+
+      exitCode:
+        code ?? 1,
     };
 
     await writeFile(
       metadataPath,
-      JSON.stringify(completedMetadata, null, 2),
+      JSON.stringify(
+        completedMetadata,
+        null,
+        2
+      ),
       'utf8'
     );
 
-    console.log('\n========================================');
-    console.log('k6 Test Run Completed');
-    console.log('========================================');
-    console.log(`Scenario:    ${selectedScenario}`);
-    console.log(`Environment: ${selectedEnvironment}`);
-    console.log(`Profile: ${profile}`);
-    console.log(`Run ID:      ${runId}`);
-    console.log(`Status:      ${status.toUpperCase()}`);
-    console.log('========================================');
-
-    console.log('\nk6 JSON Result:');
     console.log(
-      path.join(resultsDirectory, 'results.json')
+      '\n========================================'
     );
 
-    console.log('\nk6 Summary:');
     console.log(
-      path.join(reportDirectory, 'summary.json')
+      'k6 Test Run Completed'
     );
 
-    console.log('\nMetadata:');
+    console.log(
+      '========================================'
+    );
+
+    console.log(
+      `Scenario:    ${selectedScenario}`
+    );
+
+    console.log(
+      `Environment: ${selectedEnvironment}`
+    );
+
+    console.log(
+      `Profile:     ${profile}`
+    );
+
+    console.log(
+      `Base URL:    ${baseUrl}`
+    );
+
+    console.log(
+      `Run ID:      ${runId}`
+    );
+
+    console.log(
+      `Status:      ${status.toUpperCase()}`
+    );
+
+    console.log(
+      '========================================'
+    );
+
+    console.log(
+      '\nk6 JSON Result:'
+    );
+
+    console.log(resultsPath);
+
+    console.log(
+      '\nk6 Summary:'
+    );
+
+    console.log(summaryPath);
+
+    console.log(
+      '\nMetadata:'
+    );
+
     console.log(metadataPath);
 
-    process.exit(code ?? 1);
+    process.exit(
+      k6Failed
+        ? 1
+        : 0
+    );
   });
 });

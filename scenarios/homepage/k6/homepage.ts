@@ -3,12 +3,6 @@ import { check } from 'k6';
 
 const profile = __ENV.K6_PROFILE ?? 'smoke';
 
-const response = http.get(`${__ENV.BASE_URL}/`);
-
-console.log(`URL: ${`${__ENV.BASE_URL}/`}`);
-console.log(`Status: ${response.status}`);
-console.log(`Error: ${response.error}`);
-
 const profiles: Record<string, Record<string, unknown>> = {
   smoke: {
     vus: 1,
@@ -51,12 +45,41 @@ const profiles: Record<string, Record<string, unknown>> = {
       { duration: '1m', target: 0 },
     ],
   },
+
+  rps: {
+    scenarios: {
+      default: {
+        executor: 'constant-arrival-rate',
+
+        rate: 10,
+        timeUnit: '1s',
+
+        duration: '1m',
+
+        preAllocatedVUs: 5,
+        maxVUs: 20,
+      },
+    },
+  },
 };
 
-export const options = profiles[profile] ?? profiles.smoke;
+export const options =
+  profiles[profile] ?? profiles.smoke;
 
 export default function () {
-  const response = http.get(`${__ENV.BASE_URL}/`);
+  const baseUrl = __ENV.BASE_URL;
+
+  if (!baseUrl) {
+    throw new Error('BASE_URL is not configured.');
+  }
+
+  const url = `${baseUrl}/`;
+
+  const response = http.get(url);
+
+  console.log(
+    `k6 request | URL: ${url} | Status: ${response.status} | Error: ${response.error ?? ''}`
+  );
 
   check(response, {
     'status is 200': (res) => res.status === 200,
