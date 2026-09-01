@@ -1,0 +1,32 @@
+{
+  "name": "calicodesk-performance-test",
+  "version": "1.0.0",
+  "description": "CalicoDesk performance and load testing suite",
+  "main": "index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test",
+    "test:homepage": "cross-env PLAYWRIGHT_SCENARIO=homepage playwright test --project=homepage",
+    "test:auth": "cross-env PLAYWRIGHT_SCENARIO=authentication playwright test --project=authentication",
+    "report:homepage": "playwright show-report scenarios/homepage/reports/playwright/html",
+    "report:auth": "playwright show-report scenarios/authentication/reports/playwright/html",
+    "test:runner": "tsx scripts/test-runner.ts",
+    "k6:runner": "tsx scripts/k6-runner.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/k6": "^2.2.0",
+    "@types/node": "^26.4.0",
+    "cross-env": "^10.1.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  }
+}
