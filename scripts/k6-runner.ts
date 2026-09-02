@@ -4,18 +4,22 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+import {
+  loadProfileNames,
+  type LoadProfileName,
+} from '../config/load-profiles.js';
+import {
+  isTestEnvironment,
+  resolveBaseUrl,
+  testEnvironments,
+  type TestEnvironment,
+} from '../config/base-url.js';
 
 type Scenario = 'homepage' | 'authentication';
 
-type Environment = 'local' | 'dev' | 'live';
+type Environment = TestEnvironment;
 
-type Profile =
-  | 'smoke'
-  | 'load'
-  | 'stress'
-  | 'spike'
-  | 'soak'
-  | 'rps';
+type Profile = LoadProfileName;
 
 interface RunMetadata {
   runId: string;
@@ -35,20 +39,9 @@ const validScenarios: Scenario[] = [
   'authentication',
 ];
 
-const validEnvironments: Environment[] = [
-  'local',
-  'dev',
-  'live',
-];
+const validEnvironments: Environment[] = [...testEnvironments];
 
-const validProfiles: Profile[] = [
-  'smoke',
-  'load',
-  'stress',
-  'spike',
-  'soak',
-  'rps',
-];
+const validProfiles: Profile[] = [...loadProfileNames];
 
 function getArgument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -285,7 +278,7 @@ if (!validScenarios.includes(scenario as Scenario)) {
   );
 }
 
-if (!validEnvironments.includes(environment as Environment)) {
+if (!environment || !isTestEnvironment(environment)) {
   fail(
     `Invalid environment: ${environment}\nAllowed environments: ${validEnvironments.join(', ')}`
   );
@@ -304,16 +297,23 @@ const selectedEnvironment =
 
 const runId = generateRunId();
 
-const baseUrl =
-  process.env[
-    `${selectedEnvironment.toUpperCase()}_BASE_URL`
-  ] ?? '';
+let baseUrl: string;
 
-if (!baseUrl) {
-  console.log('baseUrl', baseUrl);
-  
+try {
+  baseUrl = resolveBaseUrl(selectedEnvironment);
+} catch (error) {
   fail(
-    `BASE_URL is not configured for environment: ${selectedEnvironment}`
+    error instanceof Error
+      ? error.message
+      : `BASE_URL is not configured for environment: ${selectedEnvironment}`
+  );
+}
+
+if (selectedEnvironment === 'live') {
+  console.warn(
+    '\nWarning: Targeting the live environment. ' +
+      'Heavy profiles (load, stress, spike, soak, rps) are not started automatically. ' +
+      'Only continue if this explicit --env live selection is intentional.\n'
   );
 }
 
