@@ -1,0 +1,150 @@
+---
+description: Architecture and workflow for adding or changing CalicoDesk k6/Playwright performance scenarios.
+alwaysApply: true
+---
+
+# CalicoDesk performance testing
+
+This is a TypeScript CalicoDesk performance suite. **k6** covers HTTP load. **Playwright** covers browser checks. This file is a guide; **working code in the repo takes precedence**. Do not invent architecture or refactor working structure just to add a scenario.
+
+## Current architecture
+
+```text
+scenarios/<scenario>/
+  k6/<scenario>.ts
+  playwright/<scenario>.spec.ts
+  results/k6/          # generated, gitignored
+  results/playwright/  # generated, gitignored
+  reports/k6/          # generated, gitignored
+  reports/playwright/  # generated, gitignored
+
+config/
+  base-url.ts          # resolveBaseUrl(); local/dev/live; no default; no live fallback
+  environments.ts      # Playwright TEST_ENV + resolveBaseUrl()
+  load-profiles.ts     # smoke, load, stress, spike, soak, rps
+  run-id.ts
+  check-environment.ts
+
+scripts/
+  k6-runner.ts         # npm run k6:runner
+  test-runner.ts       # npm run test:runner
+```
+
+Existing scenarios: `homepage`, `authentication`.
+
+k6 runner expects `scenarios/<scenario>/k6/<scenario>.ts`, bundles with esbuild (`--external:k6`), then `k6 run`. It injects `BASE_URL`, `K6_PROFILE`, `K6_SCENARIO`, `K6_RUN_ID`.
+
+Playwright projects live in `playwright.config.ts` (`testMatch: **/<scenario>/playwright/**/*.spec.ts`). `test:runner` sets `TEST_ENV`, `PLAYWRIGHT_SCENARIO`, `PLAYWRIGHT_RUN_ID`.
+
+## Adding a new scenario — inspect first
+
+Do **not** start coding immediately. When asked to add a scenario:
+
+1. Read `README.md`.
+2. Inspect the closest existing scenario (`homepage` or `authentication`).
+3. Inspect `scripts/k6-runner.ts` and `scripts/test-runner.ts`.
+4. Inspect `config/base-url.ts`, `config/load-profiles.ts`, `playwright.config.ts`.
+5. Explain briefly which files will be created or modified.
+6. Implement using the existing layout. Reuse shared config. Do not duplicate URL, profile, run ID, threshold, or reporting logic.
+7. Run `npm run typecheck`.
+8. Run the appropriate smoke test.
+9. Verify artifacts and PASS/FAIL.
+10. Update `README.md` if the scenario is complete.
+11. Give a concise completion report.
+
+If a requirement conflicts with this architecture, stop and explain the conflict before structural changes.
+
+## Files to add or update
+
+Create `scenarios/<scenario-name>/` with:
+
+- `k6/<scenario-name>.ts`
+- `playwright/<scenario-name>.spec.ts` when browser validation applies
+
+Register the name in **all** of these (they are hardcoded unions/lists today):
+
+- `scripts/k6-runner.ts` — `Scenario` type, `validScenarios`, usage text
+- `scripts/test-runner.ts` — same, if Playwright is used
+- `playwright.config.ts` — `validScenarios` and a `projects` entry
+- Optional convenience scripts in `package.json` (`test:<name>`, `report:<name>`) following `test:homepage` / `test:auth`
+
+Do **not** create a new runner.
+
+## k6 rules
+
+Every k6 scenario must:
+
+- Read `BASE_URL` from `__ENV.BASE_URL` (set by the runner). Throw if missing.
+- Never hardcode hosts.
+- Use `getK6ProfileOptions` from `config/load-profiles.ts`. Support all six profiles unless there is a documented reason not to. Invalid `K6_PROFILE` must throw (via `getK6ProfileOptions`); do not silently fall back to smoke inside the script beyond the current `__ENV.K6_PROFILE ?? 'smoke'` default.
+- Keep thresholds:
+
+```ts
+thresholds: {
+  checks: ['rate==1'],
+  http_req_failed: ['rate==0'],
+}
+```
+
+- Add meaningful `check()`s for the flow (status, content-type, document shape). Do not invent APIs. Auth k6 is `GET ${BASE_URL}/login` only — no credential POST, no assumed login API.
+- Log URL and HTTP status only. Never log passwords, tokens, cookies, Authorization headers, secret request bodies, or sensitive response data.
+- Use the existing runner artifact paths.
+
+## Profile rules
+
+Profiles stay only in `config/load-profiles.ts`: **smoke**, **load**, **stress**, **spike**, **soak**, **rps**. Runner default `--profile` is **smoke**. Do not define profiles inside a scenario. A new profile must update `load-profiles.ts` and runner validation together.
+
+## Environment rules
+
+Supported: **local**, **dev**, **live** via `LOCAL_BASE_URL`, `DEV_BASE_URL`, `LIVE_BASE_URL` and `resolveBaseUrl()`. k6 always requires explicit `--env`. Never hardcode a host, silently fall back to live, invent env vars, or bypass URL validation.
+
+## Playwright rules
+
+Reuse `playwright.config.ts` and `config/environments.ts`. Write custom JSON under `scenarios/<scenario>/results/playwright/<env>/<runId>/`. Do not log or persist credentials. Traces, screenshots, and videos (`test-results/`, retain-on-failure) can contain secrets — keep them local. Homepage already records navigation timings; follow that pattern when useful.
+
+## Runner and PASS/FAIL
+
+Keep runners responsible for scenario/env/profile validation, `resolveBaseUrl()`, run IDs, artifact dirs, `metadata.json`, and PASS/FAIL.
+
+k6 must **not** report PASS just because the process exited 0. `evaluateK6Summary` fails the run if:
+
+- k6 exits non-zero
+- any check failed
+- `http_req_failed` > 0
+- any threshold was crossed
+- `summary.json` cannot be read
+
+Preserve this.
+
+## Security
+
+Never hardcode passwords, API keys, tokens, cookies, Authorization headers, or private credentials. Use `.env` (gitignored). `.env.example` placeholders only. Never write secrets to console, `metadata.json`, `results.json`, or reports.
+
+## Artifacts
+
+```text
+scenarios/<scenario>/results/k6/<env>/<runId>/results.json
+scenarios/<scenario>/reports/k6/<env>/<runId>/summary.json
+scenarios/<scenario>/reports/k6/<env>/<runId>/metadata.json
+scenarios/<scenario>/results/playwright/<env>/<runId>/results.json
+scenarios/<scenario>/reports/playwright/<env>/<runId>/
+scenarios/<scenario>/reports/playwright/html
+```
+
+Do not add unrelated output directories. Keep generated results/reports gitignored.
+
+## Quality
+
+Type-safe TypeScript. Reuse shared utilities. Keep scenario code focused on the flow. Do not change existing scenarios unless shared registration requires it. After changes: `npm run typecheck`.
+
+## New-scenario checklist
+
+- [ ] Registered in the appropriate runner(s) and `playwright.config.ts`
+- [ ] BASE_URL from resolver / `__ENV.BASE_URL`, not hardcoded
+- [ ] All applicable profiles work; thresholds present; checks meaningful
+- [ ] k6 PASS/FAIL still uses summary evaluation
+- [ ] Artifacts in the expected directories
+- [ ] No secrets logged or stored
+- [ ] `npm run typecheck` passes
+- [ ] Relevant smoke test passes (`--profile smoke`, prefer `--env local` or `--env dev`)
+- [ ] `README.md` updated: what it tests, and the real commands
