@@ -455,6 +455,8 @@ Make sure a k6 performance test has completed execution successfully first, e.g.
   console.log(relativeHtmlPath);
   console.log('\nPDF Report:');
   console.log(relativePdfPath);
+  console.log('\nShow PDF Report:');
+  console.log('start ',relativePdfPath);
   console.log('\n========================================');
   console.log('Report generation completed successfully.');
   console.log('========================================\n');
