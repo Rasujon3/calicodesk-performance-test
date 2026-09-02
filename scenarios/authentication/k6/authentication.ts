@@ -13,6 +13,23 @@ export const options = {
   },
 };
 
+/*
+ * k6 cannot replay the real CalicoDesk login.
+ *
+ * Playwright shows a browser SPA:
+ *   GET /login → Welcome back → Email + Continue
+ *   → workspace host /login?step=password
+ *   → Password + Sign in → /dashboard
+ *
+ * The email/password UI is rendered by JavaScript.
+ * Those strings are not in the HTTP HTML. Continue
+ * navigates to a workspace host that is not configured
+ * here. Sign in is blocked by Google reCAPTCHA.
+ * There is no documented login API for k6 to POST.
+ *
+ * This scenario therefore validates the login document
+ * over HTTP. Credential POST is intentionally omitted.
+ */
 export default function () {
   const baseUrl = __ENV.BASE_URL;
 
@@ -24,11 +41,25 @@ export default function () {
 
   const response = http.get(url);
 
+  const body =
+    typeof response.body === 'string'
+      ? response.body
+      : '';
+
+  const contentType = String(
+    response.headers['Content-Type'] ??
+      response.headers['content-type'] ??
+      ''
+  );
+
   console.log(
     `k6 request | URL: ${url} | Status: ${response.status} | Error: ${response.error ?? ''}`
   );
 
   check(response, {
     'login page status is 200': (res) => res.status === 200,
+    'login page is HTML': () => contentType.includes('text/html'),
+    'login page is a substantial document': () =>
+      body.length > 10_000 && body.toLowerCase().includes('login'),
   });
 }
