@@ -11,7 +11,9 @@
     "report:homepage": "playwright show-report scenarios/homepage/reports/playwright/html",
     "report:auth": "playwright show-report scenarios/authentication/reports/playwright/html",
     "test:runner": "tsx scripts/test-runner.ts",
-    "k6:runner": "tsx scripts/k6-runner.ts"
+    "k6:runner": "tsx scripts/k6-runner.ts",
+    "loadtestreport": "tsx scripts/load-test-report.ts",
+    "loadtestresport": "tsx scripts/load-test-report.ts"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +21,7 @@
   "type": "module",
   "devDependencies": {
     "@playwright/test": "^1.62.1",
+    "playwright": "^1.62.1",
     "@types/k6": "^2.2.0",
     "@types/node": "^26.4.0",
     "cross-env": "^10.1.0",

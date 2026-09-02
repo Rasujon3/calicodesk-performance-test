@@ -166,6 +166,29 @@ npm run k6:runner -- --scenario homepage --env dev --profile rps
 
 The same `--profile` values work with `--scenario authentication`.
 
+## k6 PDF report
+
+Builds one readable HTML + PDF from **all** k6 runs under `scenarios/<scenario>/reports/k6/<env>/`.
+
+```bash
+npm run loadtestreport -- --scenario homepage --env local
+npm run loadtestreport -- --scenario homepage --env dev
+npm run loadtestreport -- --scenario homepage --env live
+
+npm run loadtestreport -- --scenario authentication --env local
+npm run loadtestreport -- --scenario authentication --env dev
+npm run loadtestreport -- --scenario authentication --env live
+```
+
+`npm run loadtestresport` is the same command.
+
+Output (today’s date folder, files are overwritten if you generate again the same day):
+
+- `scenarios/<scenario>/reports/k6/<env>/pdf/YYYY-MM-DD/load_test.html`
+- `scenarios/<scenario>/reports/k6/<env>/pdf/YYYY-MM-DD/load_test.pdf`
+
+The terminal prints the PDF path when it finishes.
+
 ## Playwright commands
 
 Preferred runner (sets `TEST_ENV` and a run ID):
