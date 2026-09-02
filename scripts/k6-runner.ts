@@ -117,6 +117,156 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+interface K6Metric {
+  [key: string]: unknown;
+  values?: Record<string, unknown>;
+  thresholds?: Record<string, unknown>;
+  fails?: number;
+  value?: number;
+}
+
+interface K6Summary {
+  metrics?: Record<string, K6Metric>;
+  root_group?: {
+    checks?: Record<
+      string,
+      {
+        fails?: number;
+      }
+    >;
+  };
+}
+
+function readMetricNumber(
+  metric: K6Metric | undefined,
+  keys: string[]
+): number {
+  if (!metric) {
+    return 0;
+  }
+
+  const nestedValues = metric.values;
+
+  if (nestedValues) {
+    for (const key of keys) {
+      const nestedValue = nestedValues[key];
+
+      if (typeof nestedValue === 'number') {
+        return nestedValue;
+      }
+    }
+  }
+
+  for (const key of keys) {
+    const value = metric[key];
+
+    if (typeof value === 'number') {
+      return value;
+    }
+  }
+
+  return 0;
+}
+
+function collectFailedThresholds(
+  metrics: Record<string, K6Metric> | undefined
+): string[] {
+  const failed: string[] = [];
+
+  if (!metrics) {
+    return failed;
+  }
+
+  for (const [metricName, metric] of Object.entries(metrics)) {
+    const thresholds = metric.thresholds;
+
+    if (!thresholds || typeof thresholds !== 'object') {
+      continue;
+    }
+
+    for (const [expression, result] of Object.entries(thresholds)) {
+      /*
+       * k6 --summary-export (v2) stores a boolean
+       * that is true when the threshold was crossed
+       * (failed). Newer handleSummary-style objects
+       * use { ok: true } when the threshold passed.
+       */
+      const crossed =
+        result === true ||
+        (typeof result === 'object' &&
+          result !== null &&
+          'ok' in result &&
+          (result as { ok?: unknown }).ok === false);
+
+      if (crossed) {
+        failed.push(`${metricName}: ${expression}`);
+      }
+    }
+  }
+
+  return failed;
+}
+
+function collectRootGroupCheckFails(
+  summary: K6Summary
+): number {
+  const checks = summary.root_group?.checks;
+
+  if (!checks) {
+    return 0;
+  }
+
+  let fails = 0;
+
+  for (const check of Object.values(checks)) {
+    fails += check.fails ?? 0;
+  }
+
+  return fails;
+}
+
+function evaluateK6Summary(summary: K6Summary): {
+  failed: boolean;
+  reasons: string[];
+} {
+  const reasons: string[] = [];
+
+  const checkFails = Math.max(
+    readMetricNumber(summary.metrics?.checks, ['fails']),
+    collectRootGroupCheckFails(summary)
+  );
+
+  if (checkFails > 0) {
+    reasons.push(`k6 checks failed: ${checkFails}`);
+  }
+
+  const httpFailedRate = readMetricNumber(
+    summary.metrics?.http_req_failed,
+    ['rate', 'value']
+  );
+
+  if (httpFailedRate > 0) {
+    reasons.push(
+      `HTTP request failure rate: ${httpFailedRate}`
+    );
+  }
+
+  const failedThresholds = collectFailedThresholds(
+    summary.metrics
+  );
+
+  if (failedThresholds.length > 0) {
+    reasons.push(
+      `k6 thresholds failed: ${failedThresholds.join('; ')}`
+    );
+  }
+
+  return {
+    failed: reasons.length > 0,
+    reasons,
+  };
+}
+
 const scenario = getArgument('--scenario');
 const environment = getArgument('--env');
 
@@ -399,12 +549,15 @@ build.on('exit', async (buildCode) => {
 
   k6.on('exit', async (code) => {
     let k6Failed = code !== 0;
+    let failureReasons: string[] = [];
 
     /*
      * k6 can exit with code 0 even when
-     * checks or HTTP requests fail.
+     * checks, HTTP requests, or thresholds fail.
      *
-     * Therefore, also inspect summary.json.
+     * Therefore, always inspect summary.json
+     * and never report PASSED when checks or
+     * thresholds failed.
      */
     try {
       const summaryText = await readFile(
@@ -412,24 +565,13 @@ build.on('exit', async (buildCode) => {
         'utf8'
       );
 
-      const summary = JSON.parse(summaryText);
+      const summary = JSON.parse(summaryText) as K6Summary;
 
-      const checks = summary.metrics?.checks;
-      const httpReqFailed =
-        summary.metrics?.http_req_failed;
+      const evaluation = evaluateK6Summary(summary);
 
-      const checksFailed =
-        checks?.values?.fails ?? 0;
-
-      const httpFailedRate =
-        httpReqFailed?.values?.rate ?? 0;
-
-      if (checksFailed > 0) {
+      if (evaluation.failed) {
         k6Failed = true;
-      }
-
-      if (httpFailedRate > 0) {
-        k6Failed = true;
+        failureReasons = evaluation.reasons;
       }
     } catch (error) {
       console.error(
@@ -439,6 +581,15 @@ build.on('exit', async (buildCode) => {
       console.error(error);
 
       k6Failed = true;
+      failureReasons = [
+        'Could not validate k6 summary.json',
+      ];
+    }
+
+    if (code !== 0 && failureReasons.length === 0) {
+      failureReasons = [
+        `k6 exited with code ${code ?? 1}`,
+      ];
     }
 
     const status =
@@ -455,7 +606,9 @@ build.on('exit', async (buildCode) => {
       status,
 
       exitCode:
-        code ?? 1,
+        k6Failed
+          ? (code && code !== 0 ? code : 1)
+          : 0,
     };
 
     await writeFile(
@@ -503,6 +656,16 @@ build.on('exit', async (buildCode) => {
     console.log(
       `Status:      ${status.toUpperCase()}`
     );
+
+    if (failureReasons.length > 0) {
+      console.log(
+        '\nFailure reasons:'
+      );
+
+      for (const reason of failureReasons) {
+        console.log(`- ${reason}`);
+      }
+    }
 
     console.log(
       '========================================'

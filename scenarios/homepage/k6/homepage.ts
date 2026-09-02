@@ -63,8 +63,22 @@ const profiles: Record<string, Record<string, unknown>> = {
   },
 };
 
-export const options =
-  profiles[profile] ?? profiles.smoke;
+const selectedProfile = profiles[profile];
+
+if (!selectedProfile) {
+  throw new Error(
+    `Invalid k6 profile: ${profile}. Allowed profiles: ${Object.keys(profiles).join(', ')}`
+  );
+}
+
+export const options = {
+  ...selectedProfile,
+
+  thresholds: {
+    checks: ['rate==1'],
+    http_req_failed: ['rate==0'],
+  },
+};
 
 export default function () {
   const baseUrl = __ENV.BASE_URL;
