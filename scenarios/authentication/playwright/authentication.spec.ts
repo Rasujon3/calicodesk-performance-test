@@ -86,6 +86,34 @@ function sanitizeUrlForReporting(rawUrl: string): string {
   }
 }
 
+/**
+ * Third-party analytics/telemetry hosts. Failures here (including
+ * net::ERR_ABORTED on navigation) are not application resource failures.
+ * Do not add arbitrary third-party domains — only known tracking endpoints.
+ */
+const IGNORED_THIRD_PARTY_RESOURCE_HOSTS = [
+  'www.google-analytics.com',
+  'google-analytics.com',
+  'region1.google-analytics.com',
+  'www.googletagmanager.com',
+  'googletagmanager.com',
+  'stats.g.doubleclick.com',
+] as const;
+
+function isIgnoredThirdPartyResource(rawUrl: string): boolean {
+  try {
+    const { hostname } = new URL(rawUrl);
+    const host = hostname.toLowerCase();
+
+    return IGNORED_THIRD_PARTY_RESOURCE_HOSTS.some(
+      (ignoredHost) =>
+        host === ignoredHost || host.endsWith(`.${ignoredHost}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function writeAuthenticationResult(
   result: AuthenticationPlaywrightResult
 ): Promise<string> {
@@ -279,6 +307,10 @@ test('authentication login and logout lifecycle succeeds', async ({ page }) => {
   page.on('requestfailed', (request) => {
     const url = request.url();
 
+    if (isIgnoredThirdPartyResource(url)) {
+      return;
+    }
+
     if (failedRequestUrls.has(url)) {
       return;
     }
@@ -300,6 +332,10 @@ test('authentication login and logout lifecycle succeeds', async ({ page }) => {
     }
 
     const url = response.url();
+
+    if (isIgnoredThirdPartyResource(url)) {
+      return;
+    }
 
     if (failedRequestUrls.has(url)) {
       return;
