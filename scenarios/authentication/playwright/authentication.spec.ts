@@ -61,6 +61,31 @@ function getRequiredCredential(name: 'TEST_USER_EMAIL' | 'TEST_USER_PASSWORD'): 
   return value;
 }
 
+/** Redact credential-bearing query params before console/results persistence. */
+function sanitizeUrlForReporting(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    const sensitiveKeys = [
+      'email',
+      'password',
+      'token',
+      'access_token',
+      'accessToken',
+      'authorization',
+    ];
+
+    for (const key of sensitiveKeys) {
+      if (parsed.searchParams.has(key)) {
+        parsed.searchParams.set(key, '[redacted]');
+      }
+    }
+
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 async function writeAuthenticationResult(
   result: AuthenticationPlaywrightResult
 ): Promise<string> {
@@ -79,7 +104,18 @@ async function writeAuthenticationResult(
 
   await writeFile(
     resultsPath,
-    JSON.stringify(result, null, 2),
+    JSON.stringify(
+      {
+        ...result,
+        url: sanitizeUrlForReporting(result.url),
+        failedResources: result.failedResources.map((resource) => ({
+          ...resource,
+          url: sanitizeUrlForReporting(resource.url),
+        })),
+      },
+      null,
+      2
+    ),
     'utf8'
   );
 
@@ -205,8 +241,8 @@ async function collectNavigationTimings(
   });
 }
 
-test('authentication login succeeds', async ({ page }) => {
-  test.setTimeout(90_000);
+test('authentication login and logout lifecycle succeeds', async ({ page }) => {
+  test.setTimeout(120_000);
 
   const runId = process.env.PLAYWRIGHT_RUN_ID;
 
@@ -251,7 +287,7 @@ test('authentication login succeeds', async ({ page }) => {
 
     failedResources.push({
       method: request.method(),
-      url,
+      url: sanitizeUrlForReporting(url),
       reason: request.failure()?.errorText ?? 'request failed',
     });
   });
@@ -273,7 +309,7 @@ test('authentication login succeeds', async ({ page }) => {
 
     failedResources.push({
       method: response.request().method(),
-      url,
+      url: sanitizeUrlForReporting(url),
       reason: `HTTP ${status}`,
     });
   });
@@ -286,7 +322,7 @@ test('authentication login succeeds', async ({ page }) => {
     });
 
     wallClockLoadMs = Date.now() - navigationStartedAt;
-    pageUrl = page.url();
+    pageUrl = sanitizeUrlForReporting(page.url());
     httpStatus = response?.status() ?? null;
     navigationTimings = await collectNavigationTimings(page);
 
@@ -382,11 +418,119 @@ test('authentication login succeeds', async ({ page }) => {
       timeout: 30_000,
     });
 
-    pageUrl = page.url();
+    pageUrl = sanitizeUrlForReporting(page.url());
+
+    const authMenuToggle = page.getByRole('button', {
+      name: 'toggle authentication menu',
+    });
+
+    await expect(
+      authMenuToggle,
+      'authenticated dashboard should show the authentication menu control',
+    ).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await authMenuToggle.click();
+
+    const logoutMenuItem = page.getByRole('menuitem', {
+      name: 'Log out',
+    });
+
+    await expect(
+      logoutMenuItem,
+      'authentication menu should expose Log out',
+    ).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Observe the logout request the UI already makes (do not invent a separate API call).
+    const logoutResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().includes('/api/v1/auth/logout'),
+      {
+        timeout: 30_000,
+      },
+    );
+
+    await logoutMenuItem.click();
+
+    const logoutResponse = await logoutResponsePromise;
+
+    expect(
+      logoutResponse.ok(),
+      'UI logout request should succeed',
+    ).toBeTruthy();
+
+    await expect(
+      page,
+      'logout should leave the dashboard (app redirects to /)',
+    ).not.toHaveURL(/\/dashboard/, {
+      timeout: 30_000,
+    });
+
+    await expect(
+      page,
+      'logout should navigate to the app home path',
+    ).toHaveURL((url) => {
+      const { pathname } = new URL(url);
+      return pathname === '/' || pathname === '';
+    }, {
+      timeout: 30_000,
+    });
+
+    await expect(
+      authMenuToggle,
+      'dashboard authentication menu should be gone after logout',
+    ).toHaveCount(0);
+
+    // After SPA logout the help-center/home navbar shows guest Login (not a full reload,
+    // which can rehydrate a leftover local HTTP session cookie).
+    const loginLink = page.getByRole('link', {
+      name: 'Login',
+      exact: true,
+    });
+
+    await expect(
+      loginLink,
+      'guest Login control should be visible after logout',
+    ).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await loginLink.click();
+
+    await expect(
+      page,
+      'Login should open the login page',
+    ).toHaveURL(/\/login/, {
+      timeout: 30_000,
+    });
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Welcome back',
+      }),
+      'login form should be visible after logout',
+    ).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await expect(
+      page.getByRole('textbox', {
+        name: 'Email',
+      }),
+      'login email field should be visible after logout',
+    ).toBeVisible({
+      timeout: 30_000,
+    });
+
+    pageUrl = sanitizeUrlForReporting(page.url());
 
     expect(
       pageErrors,
-      'login page should not throw uncaught JavaScript errors',
+      'authentication lifecycle should not throw uncaught JavaScript errors',
     ).toEqual([]);
 
     testStatus = 'passed';

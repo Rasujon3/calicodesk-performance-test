@@ -6,8 +6,8 @@ What authentication tests:
 
 | Tool           | What it checks                                                                                 |
 | -------------- | ---------------------------------------------------------------------------------------------- |
-| **Playwright** | Performs browser-based login flow. Opens `/login`, enters email, clicks Continue, enters password, handles Google reCAPTCHA if present, clicks Sign in, and expects navigation to `/dashboard`. Records navigation and page-load timings. |
-| **k6**         | HTTP `GET /login` with load profiles. Expects HTTP 200, HTML Content-Type, and substantial document body containing 'login'. |
+| **Playwright** | Full browser auth lifecycle including logout and guest login verification. |
+| **k6**         | Full HTTP auth lifecycle: `GET /login` document check, `POST /api/v1/tenant/find-workspaces-by-email`, `POST {workspace}/auth/login`, authenticated `GET /api/v1/bootstrap-data`, `POST /api/v1/auth/logout`, then same Bearer against bootstrap-data expecting **401**. |
 
 You need a filled `.env` (`LOCAL_BASE_URL`, `DEV_BASE_URL`, `LIVE_BASE_URL`, `TEST_USER_EMAIL`, `TEST_USER_PASSWORD`). Copy from `.env.example` if you have not already.
 
@@ -228,9 +228,10 @@ The terminal prints the PDF path when it finishes.
 
 ## Important notes & limitations
 
-- **k6 login POST omission:** Real CalicoDesk login uses a JavaScript SPA where the email step dynamically navigates to a workspace host to prompt for a password, which is blocked by Google reCAPTCHA. Because there is no documented login HTTP API endpoint, k6 is restricted to checking the GET request of the `/login` document. It verifies HTTP status 200, content-type `text/html`, and that the page body size is substantial (> 10 KB) and contains `'login'`.
-- **Playwright Full Interaction:** Playwright executes a complete, real browser-based login interaction, fills out the email field, clicks Continue, fills out the password field, resolves/bypasses reCAPTCHA if possible, clicks Sign in, and expects a successful redirect to `/dashboard`.
-- **Playwright Timeout:** The Playwright authentication scenario is allocated a generous `90_000` ms (90 seconds) timeout to accommodate slower network timings and reCAPTCHA checks on slower environments.
+- **k6 auth lifecycle:** k6 keeps the `GET /login` document checks, then mirrors the verified APIs: workspace email lookup, `POST /auth/login` on the workspace host (Bearer token), authenticated `GET /api/v1/bootstrap-data`, `POST /api/v1/auth/logout`, and a post-logout bootstrap probe expecting **401** (token revoked). Credentials come from `TEST_USER_EMAIL` / `TEST_USER_PASSWORD`. Captcha is skipped by the app in Laravel `local`; other envs may require captcha disabled or test keys.
+- **Playwright Full Interaction:** Playwright executes the real browser login, expects `/dashboard`, opens the dashboard auth menu (`toggle authentication menu`), clicks **Log out**, waits for the UI’s `POST /api/v1/auth/logout` to succeed, expects navigation to `/` with the auth menu gone and guest **Login** visible, then opens login via that control and confirms `Welcome back` + Email.
+- **Playwright Timeout:** The Playwright authentication scenario is allocated `120_000` ms (120 seconds) to cover login, reCAPTCHA, logout, and post-logout checks.
+- **Logout UI:** Logout is driven only through the existing dashboard auth menu. The test does not invent or call a separate logout helper API; it only observes the request the UI already makes.
 
 ---
 

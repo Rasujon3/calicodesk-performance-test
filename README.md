@@ -64,8 +64,8 @@ Copy-Item .env.example .env
 | `LOCAL_BASE_URL` | Both runners | URL for `--env local` |
 | `DEV_BASE_URL` | Both runners | URL for `--env dev` |
 | `LIVE_BASE_URL` | Both runners | URL for `--env live` |
-| `TEST_USER_EMAIL` | Playwright authentication only | Test account email |
-| `TEST_USER_PASSWORD` | Playwright authentication only | Test account password |
+| `TEST_USER_EMAIL` | Playwright + k6 authentication | Test account email |
+| `TEST_USER_PASSWORD` | Playwright + k6 authentication | Test account password |
 
 Example placeholders (not real credentials):
 
@@ -92,7 +92,7 @@ k6 scenarios read `BASE_URL` from the runner. They do not hardcode hosts.
 
 Playwright uses `TEST_ENV` plus the same URL resolver (`config/environments.ts`). `npm run test:runner -- --env <environment>` sets `TEST_ENV` for that run.
 
-k6 authentication does **not** use `TEST_USER_EMAIL` or `TEST_USER_PASSWORD`.
+k6 authentication injects `TEST_USER_EMAIL` and `TEST_USER_PASSWORD` from `.env` (never logged or written to metadata).
 
 ## Available scenarios
 
@@ -107,10 +107,10 @@ k6 authentication does **not** use `TEST_USER_EMAIL` or `TEST_USER_PASSWORD`.
 
 | Tool | What it tests |
 | --- | --- |
-| k6 | `GET ${BASE_URL}/login`. Checks HTTP 200, HTML `Content-Type`, and a substantial login document. Does **not** POST credentials. |
-| Playwright | Browser login: `/login` → email → Continue → password step → Sign in → `/dashboard`. Uses env credentials. Google reCAPTCHA on the login page can block Sign in in automation. |
+| k6 | Auth lifecycle: `GET /login` document checks, workspace lookup, `POST /auth/login`, authenticated `GET /api/v1/bootstrap-data`, `POST /api/v1/auth/logout`, post-logout bootstrap **401**. Uses env credentials. |
+| Playwright | Browser auth lifecycle: `/login` → email → Continue → password → Sign in → `/dashboard` → auth menu **Log out** → `/` → confirm guest login page. Uses env credentials. Google reCAPTCHA on the login page can block Sign in in automation. |
 
-k6 does not replay the full login. The UI is a JavaScript SPA; the password step often uses a workspace host; Sign in can require reCAPTCHA; there is no documented HTTP login API in this repo.
+k6 uses the verified HTTP APIs behind the SPA (workspace lookup + `/auth/login` + bootstrap-data + `/api/v1/auth/logout`). Captcha can still block non-local login POSTs.
 
 ## k6 profiles
 
@@ -289,7 +289,8 @@ A missing or invalid `{LOCAL,DEV,LIVE}_BASE_URL` fails immediately with the vari
 | Failed to start k6 | Install k6 and ensure `k6` is on `PATH` (`k6 version`). |
 | Playwright browsers missing | Run `npx playwright install`. |
 | Authentication Playwright fails at Sign in | Google reCAPTCHA can block automation. Disable captcha or use reCAPTCHA test keys on the test environment. |
-| `TEST_USER_EMAIL` / `TEST_USER_PASSWORD` is not configured | Required only for Playwright authentication. Set them in `.env`. |
+| `TEST_USER_EMAIL` / `TEST_USER_PASSWORD` is not configured | Required for Playwright and k6 authentication. Set them in `.env`. |
+| Authentication k6 fails at login on non-local | App captcha may be enabled outside Laravel `local`. Disable login captcha or use test keys on that environment. |
 | `npm run typecheck` fails | Fix TypeScript errors. The command is `tsc --noEmit`. |
 | Where did my run go? | See **Results and artifacts**. The runner prints the three k6 paths at the end of each run. |
 

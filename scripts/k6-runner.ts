@@ -319,6 +319,21 @@ if (selectedEnvironment === 'live') {
 
 console.log(`Base URL: ${baseUrl}`);
 
+let testUserEmail: string | undefined;
+let testUserPassword: string | undefined;
+
+if (selectedScenario === 'authentication') {
+  testUserEmail = process.env.TEST_USER_EMAIL?.trim();
+  testUserPassword = process.env.TEST_USER_PASSWORD?.trim();
+
+  if (!testUserEmail || !testUserPassword) {
+    fail(
+      'Authentication k6 requires TEST_USER_EMAIL and TEST_USER_PASSWORD in .env. ' +
+        'Use a dedicated non-production test account.'
+    );
+  }
+}
+
 const scenarioRoot = path.resolve(
   `scenarios/${selectedScenario}/k6`
 );
@@ -494,6 +509,11 @@ build.on('exit', async (buildCode) => {
     '--env',
     `K6_RUN_ID=${runId}`,
 
+    // Credentials are passed only via the child process environment
+    // (k6 --include-system-env-vars defaults to true). Do not pass
+    // TEST_USER_* through --env VAR=value — that puts secrets on the
+    // process command line.
+
     '--out',
     `json=${resultsPath}`,
 
@@ -523,6 +543,15 @@ build.on('exit', async (buildCode) => {
         K6_PROFILE: profile,
 
         BASE_URL: baseUrl,
+
+        ...(selectedScenario === 'authentication' &&
+        testUserEmail &&
+        testUserPassword
+          ? {
+              TEST_USER_EMAIL: testUserEmail,
+              TEST_USER_PASSWORD: testUserPassword,
+            }
+          : {}),
       },
     }
   );
