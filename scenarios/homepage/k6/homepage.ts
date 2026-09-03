@@ -4,8 +4,14 @@ import { getK6ProfileOptions } from '../../../config/load-profiles.js';
 
 const profile = __ENV.K6_PROFILE ?? 'smoke';
 
+const overrideVusRaw = __ENV.K6_VUS?.trim();
+const overrideVus =
+  overrideVusRaw && /^\d+$/.test(overrideVusRaw)
+    ? Number(overrideVusRaw)
+    : undefined;
+
 export const options = {
-  ...getK6ProfileOptions(profile),
+  ...getK6ProfileOptions(profile, overrideVus),
 
   thresholds: {
     checks: ['rate==1'],

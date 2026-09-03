@@ -9,7 +9,7 @@ What authentication tests:
 | **Playwright** | Full browser auth lifecycle including logout and guest login verification. |
 | **k6**         | Full HTTP auth lifecycle: `GET /login` document check, `POST /api/v1/tenant/find-workspaces-by-email`, `POST {workspace}/auth/login`, authenticated `GET /api/v1/bootstrap-data`, `POST /api/v1/auth/logout`, then same Bearer against bootstrap-data expecting **401**. |
 
-You need a filled `.env` (`LOCAL_BASE_URL`, `DEV_BASE_URL`, `LIVE_BASE_URL`, `TEST_USER_EMAIL`, `TEST_USER_PASSWORD`). Copy from `.env.example` if you have not already.
+You need a filled `.env` (`LOCAL_BASE_URL`, `DEV_BASE_URL`, `LIVE_BASE_URL`, `TEST_USER_EMAIL`, `TEST_USER_PASSWORD`, optional `K6_DEFAULT_VUS`). Copy from `.env.example` if you have not already.
 
 ---
 
@@ -61,7 +61,15 @@ npm run report:auth
 
 ## k6 (HTTP load)
 
-`--scenario` and `--env` are required. If you omit `--profile`, it defaults to **smoke** (1 VU, 30 seconds).
+`--scenario` and `--env` are required. If you omit `--profile`, it defaults to **smoke**.
+
+Peak VUs are resolved in this order:
+
+1. CLI `--vus <number>`
+2. `.env` `K6_DEFAULT_VUS` (default in `.env.example`: `10`)
+3. Profile default peak VUs
+
+The terminal prints `VUs` and `VU Source` (`CLI`, `.env`, or `profile default`) before the run starts. For the **rps** profile, arrival rate stays as configured; `--vus` / `K6_DEFAULT_VUS` only resize the VU pool.
 
 Heavy profiles (`load`, `stress`, `spike`, `soak`, `rps`) should usually stay on **local** or **dev**. Do not point them at live unless that is explicit and approved.
 
@@ -73,7 +81,15 @@ Quick check against your local app:
 npm run k6:runner -- --scenario authentication --env local --profile smoke
 ```
 
-Same environment, other profiles:
+Override VUs from the CLI:
+
+```bash
+npm run k6:runner -- --scenario authentication --env local --profile smoke --vus 2
+npm run k6:runner -- --scenario authentication --env local --profile load --vus 10
+npm run k6:runner -- --scenario authentication --env local --profile stress --vus 20
+```
+
+Same environment, other profiles (uses `K6_DEFAULT_VUS` from `.env` when `--vus` is omitted):
 
 ```bash
 npm run k6:runner -- --scenario authentication --env local --profile load
@@ -89,6 +105,12 @@ Quick check against the shared/dev app:
 
 ```bash
 npm run k6:runner -- --scenario authentication --env dev --profile smoke
+```
+
+With an explicit VU override:
+
+```bash
+npm run k6:runner -- --scenario authentication --env dev --profile load --vus 10
 ```
 
 Same environment, other profiles:
@@ -110,6 +132,24 @@ npm run k6:runner -- --scenario authentication --env live --profile smoke
 ```
 
 The runner warns when `--env live` is selected.
+
+---
+
+## k6 VUs (`.env` and CLI)
+
+In `.env`:
+
+```env
+K6_DEFAULT_VUS=10
+```
+
+| Source | When it applies | Example |
+| ------ | --------------- | ------- |
+| CLI `--vus` | Highest priority | `--vus 20` → `VU Source: CLI` |
+| `K6_DEFAULT_VUS` | Used when `--vus` is omitted | `K6_DEFAULT_VUS=10` → `VU Source: .env` |
+| Profile default | Used when neither CLI nor `.env` sets VUs | smoke peak `1` → `VU Source: profile default` |
+
+`--vus` must be a positive integer. Invalid values (`0`, `-1`, `abc`, `1.5`) fail before k6 starts.
 
 ---
 

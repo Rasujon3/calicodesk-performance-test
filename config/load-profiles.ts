@@ -15,6 +15,8 @@ export const loadProfileNames: LoadProfileName[] = [
   'rps',
 ];
 
+export type VuSource = 'cli' | 'env' | 'profile default';
+
 export interface K6Stage {
   duration: string;
   target: number;
@@ -63,6 +65,10 @@ export interface LoadProfileDefinition {
  * VU counts stay low so tests exercise profile
  * shape (ramp, spike, sustain, arrival-rate)
  * without flooding the environment.
+ *
+ * Peak VUs can be overridden at runtime via the
+ * k6 runner (--vus or K6_DEFAULT_VUS) without
+ * changing these defaults.
  */
 export const loadProfiles: Record<
   LoadProfileName,
@@ -172,8 +178,82 @@ export function isLoadProfileName(
   return loadProfileNames.includes(value as LoadProfileName);
 }
 
+/** Peak concurrent VUs (or maxVUs for rps) defined by the profile defaults. */
+export function getProfilePeakVus(profile: LoadProfileName): number {
+  const options = k6ProfileOptions[profile];
+
+  if ('vus' in options) {
+    return options.vus;
+  }
+
+  if ('stages' in options) {
+    return Math.max(...options.stages.map((stage) => stage.target));
+  }
+
+  return options.scenarios.default.maxVUs;
+}
+
+/**
+ * Apply a runtime VU override while preserving profile shape.
+ * - smoke: replace `vus`
+ * - staged profiles: scale stage targets so peak equals `vus` (0 stays 0)
+ * - rps: keep arrival `rate`; only resize the VU pool (maxVUs / preAllocatedVUs)
+ */
+export function applyVuOverride(
+  options: K6ProfileOptions,
+  vus: number
+): K6ProfileOptions {
+  if (!Number.isInteger(vus) || vus < 1) {
+    throw new Error(
+      `Invalid VU override: ${vus}. VU must be a positive integer.`
+    );
+  }
+
+  if ('vus' in options) {
+    return {
+      ...options,
+      vus,
+    };
+  }
+
+  if ('stages' in options) {
+    const peak = Math.max(
+      ...options.stages.map((stage) => stage.target)
+    );
+
+    if (peak <= 0) {
+      return options;
+    }
+
+    const scale = vus / peak;
+
+    return {
+      stages: options.stages.map((stage) => ({
+        duration: stage.duration,
+        target:
+          stage.target === 0
+            ? 0
+            : Math.max(1, Math.round(stage.target * scale)),
+      })),
+    };
+  }
+
+  const scenario = options.scenarios.default;
+
+  return {
+    scenarios: {
+      default: {
+        ...scenario,
+        maxVUs: vus,
+        preAllocatedVUs: Math.max(1, Math.min(vus, Math.ceil(vus / 2))),
+      },
+    },
+  };
+}
+
 export function getK6ProfileOptions(
-  profile: string
+  profile: string,
+  overrideVus?: number
 ): K6ProfileOptions {
   if (!isLoadProfileName(profile)) {
     throw new Error(
@@ -181,5 +261,11 @@ export function getK6ProfileOptions(
     );
   }
 
-  return k6ProfileOptions[profile];
+  const baseOptions = k6ProfileOptions[profile];
+
+  if (overrideVus === undefined) {
+    return baseOptions;
+  }
+
+  return applyVuOverride(baseOptions, overrideVus);
 }

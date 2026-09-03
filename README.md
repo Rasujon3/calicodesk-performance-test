@@ -64,6 +64,7 @@ Copy-Item .env.example .env
 | `LOCAL_BASE_URL` | Both runners | URL for `--env local` |
 | `DEV_BASE_URL` | Both runners | URL for `--env dev` |
 | `LIVE_BASE_URL` | Both runners | URL for `--env live` |
+| `K6_DEFAULT_VUS` | k6 runner (optional) | Default peak VUs when `--vus` is omitted |
 | `TEST_USER_EMAIL` | Playwright + k6 authentication | Test account email |
 | `TEST_USER_PASSWORD` | Playwright + k6 authentication | Test account password |
 
@@ -127,15 +128,17 @@ Shared configuration lives in `config/load-profiles.ts`. Values are conservative
 
 If `--profile` is omitted, the runner defaults to **smoke**.
 
+Optional `--vus <positive-integer>` overrides peak VUs for the run (CLI wins over `K6_DEFAULT_VUS` in `.env`, which wins over the profile default). For **rps**, arrival rate stays as configured; `--vus` only resizes `maxVUs` / `preAllocatedVUs`.
+
 Do not run heavy profiles against live unless that is an explicit, intentional `--env live` choice. The runner warns when `--env live` is selected.
 
 ## k6 runner commands
 
 ```bash
-npm run k6:runner -- --scenario <homepage|authentication> --env <local|dev|live> --profile <smoke|load|stress|spike|soak|rps>
+npm run k6:runner -- --scenario <homepage|authentication> --env <local|dev|live> --profile <smoke|load|stress|spike|soak|rps> [--vus <number>]
 ```
 
-`--scenario` and `--env` are required. `--profile` is optional (default: `smoke`).
+`--scenario` and `--env` are required. `--profile` is optional (default: `smoke`). `--vus` is optional.
 
 ### Homepage
 
@@ -236,7 +239,7 @@ Generated under the scenario folder. These paths are gitignored.
 | --- | --- | --- |
 | `results.json` | `scenarios/<scenario>/results/k6/<env>/<runId>/results.json` | k6 JSON metric stream |
 | `summary.json` | `scenarios/<scenario>/reports/k6/<env>/<runId>/summary.json` | End-of-run metrics, checks, and thresholds |
-| `metadata.json` | `scenarios/<scenario>/reports/k6/<env>/<runId>/metadata.json` | Run ID, scenario, env, profile, base URL, command, PASS/FAIL, exit code |
+| `metadata.json` | `scenarios/<scenario>/reports/k6/<env>/<runId>/metadata.json` | Run ID, scenario, env, profile, VUs, VU source, base URL, command, PASS/FAIL, exit code |
 
 Run IDs look like `YYYY-MM-DD_HHmmss_<hex>`.
 

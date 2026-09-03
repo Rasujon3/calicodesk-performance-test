@@ -5,8 +5,10 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import {
+  getProfilePeakVus,
   loadProfileNames,
   type LoadProfileName,
+  type VuSource,
 } from '../config/load-profiles.js';
 import {
   isTestEnvironment,
@@ -27,6 +29,8 @@ interface RunMetadata {
   environment: Environment;
   profile: Profile;
   baseUrl: string;
+  vus: number;
+  vusSource: VuSource;
   startedAt: string;
   completedAt?: string;
   status: 'running' | 'passed' | 'failed';
@@ -58,7 +62,7 @@ function printUsage(): void {
 CalicoDesk k6 Test Runner
 
 Usage:
-  npm run k6:runner -- --scenario <scenario> --env <environment> --profile <profile>
+  npm run k6:runner -- --scenario <scenario> --env <environment> --profile <profile> [--vus <number>]
 
 Scenarios:
   homepage
@@ -77,9 +81,16 @@ Profiles:
   soak
   rps
 
+Optional:
+  --vus <number>   Override peak VUs (positive integer).
+                   Priority: CLI --vus → K6_DEFAULT_VUS (.env) → profile default.
+                   For the rps profile, this resizes the VU pool only; arrival rate stays as configured.
+
 Examples:
 
   npm run k6:runner -- --scenario homepage --env local --profile smoke
+
+  npm run k6:runner -- --scenario homepage --env local --profile load --vus 10
 
   npm run k6:runner -- --scenario homepage --env dev --profile load
 
@@ -87,6 +98,71 @@ Examples:
 
   npm run k6:runner -- --scenario authentication --env dev --profile smoke
 `);
+}
+
+function parsePositiveIntegerVus(
+  raw: string,
+  sourceLabel: string
+): number {
+  if (!/^\d+$/.test(raw)) {
+    fail(
+      `Invalid ${sourceLabel} value: "${raw}".\nVU must be a positive integer.`
+    );
+  }
+
+  const value = Number(raw);
+
+  if (!Number.isInteger(value) || value < 1) {
+    fail(
+      `Invalid ${sourceLabel} value: "${raw}".\nVU must be a positive integer.`
+    );
+  }
+
+  return value;
+}
+
+function resolveVus(profile: Profile): {
+  vus: number;
+  vusSource: VuSource;
+  hasOverride: boolean;
+} {
+  const cliRaw = getArgument('--vus');
+
+  if (cliRaw !== undefined) {
+    return {
+      vus: parsePositiveIntegerVus(cliRaw, '--vus'),
+      vusSource: 'cli',
+      hasOverride: true,
+    };
+  }
+
+  const envRaw = process.env.K6_DEFAULT_VUS?.trim();
+
+  if (envRaw) {
+    return {
+      vus: parsePositiveIntegerVus(envRaw, 'K6_DEFAULT_VUS'),
+      vusSource: 'env',
+      hasOverride: true,
+    };
+  }
+
+  return {
+    vus: getProfilePeakVus(profile),
+    vusSource: 'profile default',
+    hasOverride: false,
+  };
+}
+
+function vuSourceLabel(source: VuSource): string {
+  if (source === 'cli') {
+    return 'CLI';
+  }
+
+  if (source === 'env') {
+    return '.env';
+  }
+
+  return 'profile default';
 }
 
 function generateRunId(): string {
@@ -295,6 +371,8 @@ const selectedScenario = scenario as Scenario;
 const selectedEnvironment =
   environment as Environment;
 
+const { vus, vusSource, hasOverride } = resolveVus(profile);
+
 const runId = generateRunId();
 
 let baseUrl: string;
@@ -372,7 +450,8 @@ const summaryPath = path.join(
 const startedAt = new Date().toISOString();
 
 const command =
-  `npm run k6:runner -- --scenario ${selectedScenario} --env ${selectedEnvironment} --profile ${profile}`;
+  `npm run k6:runner -- --scenario ${selectedScenario} --env ${selectedEnvironment} --profile ${profile}` +
+  (vusSource === 'cli' ? ` --vus ${vus}` : '');
 
 const metadata: RunMetadata = {
   runId,
@@ -380,6 +459,8 @@ const metadata: RunMetadata = {
   environment: selectedEnvironment,
   profile,
   baseUrl,
+  vus,
+  vusSource,
   startedAt,
   status: 'running',
   command,
@@ -412,6 +493,8 @@ console.log('========================================');
 console.log(`Scenario:    ${selectedScenario}`);
 console.log(`Environment: ${selectedEnvironment}`);
 console.log(`Profile:     ${profile}`);
+console.log(`VUs:         ${vus}`);
+console.log(`VU Source:   ${vuSourceLabel(vusSource)}`);
 console.log(`Base URL:    ${baseUrl}`);
 console.log(`Run ID:      ${runId}`);
 console.log('========================================\n');
@@ -509,6 +592,13 @@ build.on('exit', async (buildCode) => {
     '--env',
     `K6_RUN_ID=${runId}`,
 
+    ...(hasOverride
+      ? [
+          '--env',
+          `K6_VUS=${vus}`,
+        ]
+      : []),
+
     // Credentials are passed only via the child process environment
     // (k6 --include-system-env-vars defaults to true). Do not pass
     // TEST_USER_* through --env VAR=value — that puts secrets on the
@@ -543,6 +633,12 @@ build.on('exit', async (buildCode) => {
         K6_PROFILE: profile,
 
         BASE_URL: baseUrl,
+
+        ...(hasOverride
+          ? {
+              K6_VUS: String(vus),
+            }
+          : {}),
 
         ...(selectedScenario === 'authentication' &&
         testUserEmail &&
@@ -672,6 +768,14 @@ build.on('exit', async (buildCode) => {
 
     console.log(
       `Profile:     ${profile}`
+    );
+
+    console.log(
+      `VUs:         ${vus}`
+    );
+
+    console.log(
+      `VU Source:   ${vuSourceLabel(vusSource)}`
     );
 
     console.log(
