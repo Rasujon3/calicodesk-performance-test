@@ -1,7 +1,5 @@
 node_modules/
 
-.env
-.env.*
 !.env.example
 
 results/
@@ -18,3 +16,4 @@ scenarios/**/results/
 *.log
 
 .DS_Store
+config.bat

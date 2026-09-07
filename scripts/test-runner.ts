@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { generateRunId } from '../config/run-id.js';
 
-type Scenario = 'homepage' | 'authentication';
+type Scenario = 'homepage' | 'authentication' | 'chat';
 type Environment = 'local' | 'dev' | 'live';
 
 interface RunMetadata {
@@ -20,6 +20,7 @@ interface RunMetadata {
 const validScenarios: Scenario[] = [
   'homepage',
   'authentication',
+  'chat',
 ];
 
 const validEnvironments: Environment[] = [
@@ -48,6 +49,7 @@ Usage:
 Scenarios:
   homepage
   authentication
+  chat
 
 Environments:
   local
@@ -62,6 +64,10 @@ Examples:
   npm run test:runner -- --scenario authentication --env local
   npm run test:runner -- --scenario authentication --env dev
   npm run test:runner -- --scenario authentication --env live
+
+  npm run test:runner -- --scenario chat --env local
+  npm run test:runner -- --scenario chat --env dev
+  npm run test:runner -- --scenario chat --env live
 `);
 }
 

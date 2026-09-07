@@ -5,7 +5,7 @@ TypeScript suite for CalicoDesk performance and browser checks.
 - **k6** — HTTP load tests (profiles, thresholds, custom runner)
 - **Playwright** — browser-level checks for the same scenarios
 
-Supported scenarios: **homepage** and **authentication**.
+Supported scenarios: **homepage**, **authentication**, and **chat** (two-actor widget + agent conversation).
 
 Environments: **local**, **dev**, and **live**. The k6 runner always requires an explicit `--env`. It does not default to live.
 
@@ -67,6 +67,7 @@ Copy-Item .env.example .env
 | `K6_DEFAULT_VUS` | k6 runner (optional) | Default peak VUs when `--vus` is omitted |
 | `TEST_USER_EMAIL` | Playwright + k6 authentication | Test account email |
 | `TEST_USER_PASSWORD` | Playwright + k6 authentication | Test account password |
+| `CALICODESK_LIVECHAT_LOADER_URL` | Playwright chat embed test | Real `livechat-loader.js` installation script URL for the widget embed fixture |
 
 Example placeholders (not real credentials):
 
@@ -77,6 +78,7 @@ DEV_BASE_URL=https://dev.example.com
 LIVE_BASE_URL=https://www.example.com
 TEST_USER_EMAIL=test-user@example.com
 TEST_USER_PASSWORD=replace-with-local-test-password
+CALICODESK_LIVECHAT_LOADER_URL=https://<tenant>.example.com/livechat-loader.js
 ```
 
 ### How BASE_URL is resolved
@@ -93,7 +95,7 @@ k6 scenarios read `BASE_URL` from the runner. They do not hardcode hosts.
 
 Playwright uses `TEST_ENV` plus the same URL resolver (`config/environments.ts`). `npm run test:runner -- --env <environment>` sets `TEST_ENV` for that run.
 
-k6 authentication injects `TEST_USER_EMAIL` and `TEST_USER_PASSWORD` from `.env` (never logged or written to metadata).
+k6 authentication and chat inject `TEST_USER_EMAIL` and `TEST_USER_PASSWORD` from `.env` (never logged or written to metadata; chat also strips the agent token from the persisted k6 summary).
 
 ## Available scenarios
 
@@ -112,6 +114,16 @@ k6 authentication injects `TEST_USER_EMAIL` and `TEST_USER_PASSWORD` from `.env`
 | Playwright | Browser auth lifecycle: `/login` → email → Continue → password → Sign in → `/dashboard` → auth menu **Log out** → `/` → confirm guest login page. Uses env credentials. Google reCAPTCHA on the login page can block Sign in in automation. |
 
 k6 uses the verified HTTP APIs behind the SPA (workspace lookup + `/auth/login` + bootstrap-data + `/api/v1/auth/logout`). Captcha can still block non-local login POSTs.
+
+### chat
+
+| Tool | What it tests |
+| --- | --- |
+| k6 | Full two-actor conversation against the real widget + helpdesk APIs: anonymous visitor bootstrap (widget document, `XSRF`/session/customer cookies), visit, chat creation via `POST /api/v1/lc/widget/chats` (SSE `conversationCreated`), agent login (`workspace lookup` + `/auth/login`), agent reply via `POST /api/v1/helpdesk/agent/conversations/{id}/messages`, visitor message #2, and bidirectional polling checks. Uses env credentials. |
+| Playwright | **Primary regression (default `npm run test:chat`):** loads the local embed fixture `scenarios/chat/fixtures/embed.html` (a static external-website page embedding the CalicoDesk Live Chat widget) with the real installation script URL from `CALICODESK_LIVECHAT_LOADER_URL`, then verifies the loader injects `#be-chat-iframe`, the widget bootstraps (`window.BeChatReady`), and the iframe renders visibly. No dependency on W3Schools availability or its DOM structure. Uses headed system Chrome. |
+| Playwright (optional) | `npm run test:chat:w3schools` (tagged `[@w3schools]`) keeps the original exploratory W3Schools TryIt flow: extract the install `<script>` from the Login → Live Chat Install page and render/inject it into the W3Schools preview. This is the exploratory/smoke counterpart of the original business requirement (`tryit.asp?filename=tryhtml_default`) and is intentionally NOT part of the primary CI chat test. |
+
+The embed fixture is configurable without editing code: pass the loader URL via the `loaderUrl` query parameter (and optionally `widgetDomain`), and set `CALICODESK_LIVECHAT_LOADER_URL` in `.env` for Playwright. The fixture never contains credentials, tokens, or cookies; the loader derives the tenant from the installation script host (e.g. `https://sujon.manobik.com/livechat-loader.js` → `subdomain=sujon`).
 
 ## k6 profiles
 
@@ -135,7 +147,7 @@ Do not run heavy profiles against live unless that is an explicit, intentional `
 ## k6 runner commands
 
 ```bash
-npm run k6:runner -- --scenario <homepage|authentication> --env <local|dev|live> --profile <smoke|load|stress|spike|soak|rps> [--vus <number>]
+npm run k6:runner -- --scenario <homepage|authentication|chat> --env <local|dev|live> --profile <smoke|load|stress|spike|soak|rps> [--vus <number>]
 ```
 
 `--scenario` and `--env` are required. `--profile` is optional (default: `smoke`). `--vus` is optional.
@@ -156,6 +168,16 @@ npm run k6:runner -- --scenario authentication --env dev --profile smoke
 npm run k6:runner -- --scenario authentication --env live --profile smoke
 ```
 
+The k6 chat scenario sends real widget traffic (a new conversation per iteration) against the tenant from `DEV_BASE_URL`/`LOCAL_BASE_URL`/`LIVE_BASE_URL`, reproducing the two-actor Playwright contract. The chat k6 requires `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` (the agent account).
+
+### Chat
+
+```bash
+npm run k6:runner -- --scenario chat --env local --profile smoke
+npm run k6:runner -- --scenario chat --env dev --profile smoke
+npm run k6:runner -- --scenario chat --env live --profile smoke
+```
+
 ### Profiles (dev examples)
 
 ```bash
@@ -167,7 +189,7 @@ npm run k6:runner -- --scenario homepage --env dev --profile soak
 npm run k6:runner -- --scenario homepage --env dev --profile rps
 ```
 
-The same `--profile` values work with `--scenario authentication`.
+The same `--profile` values work with `--scenario authentication` and `--scenario chat`.
 
 ## k6 PDF report
 
@@ -181,6 +203,10 @@ npm run loadtestreport -- --scenario homepage --env live
 npm run loadtestreport -- --scenario authentication --env local
 npm run loadtestreport -- --scenario authentication --env dev
 npm run loadtestreport -- --scenario authentication --env live
+
+npm run loadtestreport -- --scenario chat --env local
+npm run loadtestreport -- --scenario chat --env dev
+npm run loadtestreport -- --scenario chat --env live
 ```
 
 `npm run loadtestresport` is the same command.
@@ -204,6 +230,10 @@ npm run test:runner -- --scenario homepage --env live
 npm run test:runner -- --scenario authentication --env local
 npm run test:runner -- --scenario authentication --env dev
 npm run test:runner -- --scenario authentication --env live
+
+npm run test:runner -- --scenario chat --env local
+npm run test:runner -- --scenario chat --env dev
+npm run test:runner -- --scenario chat --env live
 ```
 
 Package shortcuts (use `TEST_ENV` from `.env`):
@@ -211,6 +241,7 @@ Package shortcuts (use `TEST_ENV` from `.env`):
 ```bash
 npm run test:homepage
 npm run test:auth
+npm run test:chat
 npm test
 ```
 
@@ -219,6 +250,7 @@ HTML reports:
 ```bash
 npm run report:homepage
 npm run report:auth
+npm run report:chat
 ```
 
 ## Type checking
@@ -288,7 +320,7 @@ A missing or invalid `{LOCAL,DEV,LIVE}_BASE_URL` fails immediately with the vari
 | --- | --- |
 | `LOCAL_BASE_URL` / `DEV_BASE_URL` / `LIVE_BASE_URL` is not configured | Copy `.env.example` to `.env` and set the URL for that environment. |
 | Invalid URL for environment | The value must be a valid URL. Remove a trailing slash if needed; the resolver strips them. |
-| Invalid environment / profile / scenario | Allowed values: envs `local`, `dev`, `live`; profiles `smoke`, `load`, `stress`, `spike`, `soak`, `rps`; scenarios `homepage`, `authentication`. |
+| Invalid environment / profile / scenario | Allowed values: envs `local`, `dev`, `live`; profiles `smoke`, `load`, `stress`, `spike`, `soak`, `rps`; scenarios `homepage`, `authentication`, `chat`. |
 | Failed to start k6 | Install k6 and ensure `k6` is on `PATH` (`k6 version`). |
 | Playwright browsers missing | Run `npx playwright install`. |
 | Authentication Playwright fails at Sign in | Google reCAPTCHA can block automation. Disable captcha or use reCAPTCHA test keys on the test environment. |
@@ -320,9 +352,12 @@ A missing or invalid `{LOCAL,DEV,LIVE}_BASE_URL` fails immediately with the vari
     ├── homepage/
     │   ├── k6/homepage.ts
     │   └── playwright/homepage.spec.ts
-    └── authentication/
-        ├── k6/authentication.ts
-        └── playwright/authentication.spec.ts
+    ├── authentication/
+    │   ├── k6/authentication.ts
+    │   └── playwright/authentication.spec.ts
+    └── chat/
+        ├── k6/chat.ts
+        └── playwright/chat.spec.ts
 ```
 
 Generated `scenarios/**/results/` and `scenarios/**/reports/` directories appear after a run and are gitignored.

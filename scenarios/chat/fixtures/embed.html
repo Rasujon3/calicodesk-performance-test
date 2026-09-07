@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example Website — CalicoDesk Live Chat Embed Fixture</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: #f6f7f9;
+        color: #1f2328;
+      }
+
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 2rem 1.25rem 4rem;
+      }
+
+      header {
+        border-bottom: 1px solid #e3e6ea;
+        padding-bottom: 1rem;
+        margin-bottom: 1.25rem;
+      }
+
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1.6rem;
+      }
+
+      p {
+        line-height: 1.55;
+      }
+
+      .placeholder-card {
+        background: #ffffff;
+        border: 1px solid #e3e6ea;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin: 1rem 0;
+      }
+
+      #fixture-status {
+        display: inline-block;
+        margin-top: 1.5rem;
+        padding: 0.5rem 0.9rem;
+        border-radius: 999px;
+        background: #eef1f4;
+        border: 1px solid #d8dde3;
+        font-size: 0.9rem;
+      }
+
+      #fixture-status[data-fixture-status="ready"] {
+        background: #e6f6ec;
+        border-color: #b7e3c6;
+        color: #0f6b34;
+      }
+
+      #fixture-status[data-fixture-status="failed"] {
+        background: #fdecec;
+        border-color: #f2c1c1;
+        color: #b3261e;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Example Website</h1>
+        <p>
+          This page simulates an external website that embeds the
+          <strong>CalicoDesk Live Chat</strong> widget.
+        </p>
+        <p>
+          It loads the <em>real</em> CalicoDesk installation script
+          (<code>livechat-loader.js</code>) using the URL passed in the
+          <code>loaderUrl</code> query parameter — no credentials, tokens, or
+          secrets are ever stored here.
+        </p>
+      </header>
+
+      <section>
+        <h2>Welcome visitor</h2>
+        <div class="placeholder-card">
+          <p>
+            Feel free to browse the site. A chat button will appear in the
+            bottom-right corner once the live chat widget finishes loading.
+          </p>
+        </div>
+        <div class="placeholder-card">
+          <p>Feature list would live here.</p>
+          <ul>
+            <li>Product documentation</li>
+            <li>Pricing plans</li>
+            <li>Contact support</li>
+          </ul>
+        </div>
+      </section>
+
+      <footer id="fixture-status" data-fixture-status="loading">
+        CalicoDesk Live Chat fixture: waiting for widget bootstrap…
+      </footer>
+    </main>
+
+    <script>
+      (function () {
+        'use strict';
+
+        // -----------------------------------------------------------------
+        // 1. Resolve the widget installation script configuration from the
+        //    URL. Nothing here is secret: loaderUrl is the real CalicoDesk
+        //    livechat-loader.js installation script URL and widgetDomain
+        //    optionally overrides the widget iframe domain.
+        // -----------------------------------------------------------------
+        var params = new URLSearchParams(window.location.search);
+
+        var loaderUrl = params.get('loaderUrl') || '';
+        var widgetDomain = params.get('widgetDomain') || '';
+
+        var status = document.getElementById('fixture-status');
+
+        function setStatus(state, text) {
+          status.setAttribute('data-fixture-status', state);
+          status.textContent = text;
+        }
+
+        if (!loaderUrl) {
+          setStatus(
+            'failed',
+            'missing required "loaderUrl" query parameter (the CalicoDesk livechat-loader.js URL).'
+          );
+          return;
+        }
+
+        if (!/^(https?:)?\/\//i.test(loaderUrl)) {
+          setStatus('failed', 'invalid "loaderUrl" query parameter.');
+          return;
+        }
+
+        // -----------------------------------------------------------------
+        // 2. Application-level configuration understood by the loader.
+        //    The loader itself derives the tenant/site from the loader URL
+        //    host and passes the embedding page origin to the widget.
+        // -----------------------------------------------------------------
+        window.BeChatSettings = window.BeChatSettings || {};
+
+        if (widgetDomain) {
+          window.BeChatSettings.widgetDomain = widgetDomain;
+        }
+
+        // -----------------------------------------------------------------
+        // 3. Deterministic bootstrap signal for automated tests: the loader
+        //    calls window.BeChatReady after the widget iframe posts its
+        //    bootstrap message.
+        // -----------------------------------------------------------------
+        window.BeChatReady = function beChatReady(beChat) {
+          document.body.setAttribute('data-be-chat-ready', 'true');
+          window.BeChat = beChat;
+          setStatus('ready', 'CalicoDesk Live Chat fixture: widget bootstrapped and ready.');
+        };
+
+        // -----------------------------------------------------------------
+        // 4. Load the real CalicoDesk Live Chat installation script.
+        // -----------------------------------------------------------------
+        var script = document.createElement('script');
+        script.src = loaderUrl;
+        script.async = true;
+
+        script.addEventListener('error', function onLoaderError() {
+          setStatus('failed', 'could not load the CalicoDesk Live Chat loader: ' + loaderUrl);
+        });
+
+        document.body.appendChild(script);
+      })();
+    </script>
+  </body>
+</html>
