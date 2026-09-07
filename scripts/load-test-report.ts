@@ -14,11 +14,12 @@ import {
   type k6ReportData,
 } from './load-test-report-html.js';
 
-type Scenario = 'homepage' | 'authentication';
+type Scenario = 'homepage' | 'authentication' | 'chat';
 
 const validScenarios: Scenario[] = [
   'homepage',
   'authentication',
+  'chat',
 ];
 
 function getArgument(name: string): string | undefined {
@@ -42,6 +43,7 @@ Usage:
 Scenarios:
   homepage
   authentication
+  chat
 
 Environments:
   local

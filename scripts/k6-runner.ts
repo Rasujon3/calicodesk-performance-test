@@ -17,7 +17,7 @@ import {
   type TestEnvironment,
 } from '../config/base-url.js';
 
-type Scenario = 'homepage' | 'authentication';
+type Scenario = 'homepage' | 'authentication' | 'chat';
 
 type Environment = TestEnvironment;
 
@@ -41,6 +41,7 @@ interface RunMetadata {
 const validScenarios: Scenario[] = [
   'homepage',
   'authentication',
+  'chat',
 ];
 
 const validEnvironments: Environment[] = [...testEnvironments];
@@ -67,6 +68,7 @@ Usage:
 Scenarios:
   homepage
   authentication
+  chat
 
 Environments:
   local
@@ -97,6 +99,8 @@ Examples:
   npm run k6:runner -- --scenario homepage --env live --profile smoke
 
   npm run k6:runner -- --scenario authentication --env dev --profile smoke
+
+  npm run k6:runner -- --scenario chat --env dev --profile smoke
 `);
 }
 
@@ -204,6 +208,8 @@ interface K6Summary {
       }
     >;
   };
+  /** setup() return value embedded by k6; stripped before persisting. */
+  setup_data?: Record<string, unknown>;
 }
 
 function readMetricNumber(
@@ -400,13 +406,17 @@ console.log(`Base URL: ${baseUrl}`);
 let testUserEmail: string | undefined;
 let testUserPassword: string | undefined;
 
-if (selectedScenario === 'authentication') {
+if (
+  selectedScenario === 'authentication' ||
+  selectedScenario === 'chat'
+) {
   testUserEmail = process.env.TEST_USER_EMAIL?.trim();
   testUserPassword = process.env.TEST_USER_PASSWORD?.trim();
 
   if (!testUserEmail || !testUserPassword) {
     fail(
-      'Authentication k6 requires TEST_USER_EMAIL and TEST_USER_PASSWORD in .env. ' +
+      `${selectedScenario === 'chat' ? 'Chat' : 'Authentication'} ` +
+        'k6 requires TEST_USER_EMAIL and TEST_USER_PASSWORD in .env. ' +
         'Use a dedicated non-production test account.'
     );
   }
@@ -640,7 +650,8 @@ build.on('exit', async (buildCode) => {
             }
           : {}),
 
-        ...(selectedScenario === 'authentication' &&
+        ...((selectedScenario === 'authentication' ||
+          selectedScenario === 'chat') &&
         testUserEmail &&
         testUserPassword
           ? {
@@ -691,6 +702,20 @@ build.on('exit', async (buildCode) => {
       );
 
       const summary = JSON.parse(summaryText) as K6Summary;
+
+      // k6 embeds the value returned from setup() (e.g. the chat
+      // scenario's agent access token) into --summary-export. Strip
+      // it before the report is persisted so secrets never land in
+      // the artifacts directory.
+      if ('setup_data' in summary) {
+        delete summary.setup_data;
+
+        await writeFile(
+          summaryPath,
+          JSON.stringify(summary, null, 2),
+          'utf8'
+        );
+      }
 
       const evaluation = evaluateK6Summary(summary);
 
